@@ -79,8 +79,10 @@
   #app.visible{display:block;}
 
   /* ---------- filter bar ---------- */
+  /* Căn đáy, không căn giữa: các .fgroup cao hơn vì có nhãn phía trên,
+     căn giữa sẽ làm nút và ô đếm lệch khỏi hàng select. */
   .filterbar{
-    display:flex;gap:10px;flex-wrap:wrap;align-items:center;
+    display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;
     background:var(--panel);border:1px solid var(--border);border-radius:10px;
     padding:12px 14px;margin-bottom:22px;
   }
@@ -91,7 +93,12 @@
   }
   .filterbar .fgroup{display:flex;flex-direction:column;}
   .filterbar .spacer{flex:1;}
-  .filterbar .count{font-size:12.5px;color:var(--text-dim);font-family:var(--mono);}
+  /* Cho nút cùng chiều cao với select để đứng thẳng hàng. */
+  .filterbar .btn{padding:6px 12px;font-size:13px;}
+  /* 7px = padding dưới + viền của select, để chữ nằm cùng đường với chữ trong select. */
+  .filterbar .count{
+    font-size:12.5px;color:var(--text-dim);font-family:var(--mono);padding-bottom:7px;
+  }
 
   /* ---------- hero stats ---------- */
   .hero{
@@ -164,6 +171,16 @@
   .scroll-table table{font-size:12.5px;}
 
   .search-row{display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;align-items:center;}
+
+  /* Phân trang: thông tin bên trái, nút bên phải. Thông tin đứng riêng một bên
+     để số lớn (hàng chục nghìn lệnh) không đẩy layout. */
+  .pager{
+    display:flex;justify-content:space-between;align-items:center;
+    gap:12px;flex-wrap:wrap;margin-top:12px;
+  }
+  .pager .count{font-size:12.5px;color:var(--text-dim);font-family:var(--mono);}
+  .pager-nav{display:flex;gap:8px;margin-left:auto;}
+  .pager-nav .btn{padding:6px 12px;font-size:13px;}
   .search-row input[type=text]{
     background:var(--panel-2);border:1px solid var(--border);color:var(--text);
     border-radius:6px;padding:7px 10px;font-family:var(--sans);font-size:13px;flex:1;min-width:180px;
@@ -296,13 +313,14 @@
       <h2>Toàn bộ lệnh</h2>
       <div class="search-row">
         <input type="text" id="searchBox" placeholder="Tìm theo coin…">
-        <div class="count" id="rowCount"></div>
       </div>
       <div class="scroll-table"><table id="logTable"></table></div>
-      <div class="search-row" style="justify-content:flex-end;margin-top:10px;margin-bottom:0">
-        <button class="btn" id="logPrev">‹ Trước</button>
-        <span class="count" id="logPageInfo" style="align-self:center"></span>
-        <button class="btn" id="logNext">Sau ›</button>
+      <div class="pager">
+        <span class="count" id="logPageInfo"></span>
+        <div class="pager-nav">
+          <button class="btn" id="logPrev">‹ Trước</button>
+          <button class="btn" id="logNext">Sau ›</button>
+        </div>
       </div>
     </div>
 
@@ -337,6 +355,8 @@ const fmtSigned = (v, digits = 2) => {
   return (n >= 0 ? '+' : '−') + s;
 };
 const fmtPct = (v, digits = 1) => `${fmt(v, digits)}%`;
+// Số đếm: có dấu phân cách nghìn, dùng chung mọi nơi để không chỗ "4052" chỗ "4.052".
+const fmtInt = (v) => Number(v || 0).toLocaleString('vi-VN');
 const cls = (v) => (num(v) >= 0 ? 'pos' : 'neg');
 const dateFmt = (iso) => new Date(iso).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
 const dateTimeFmt = (iso) => new Date(iso).toLocaleString('vi-VN', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' });
@@ -449,7 +469,7 @@ function finishLoad() {
   $('#clearBtn').style.display = 'inline-block';
 
   $('#mergeSummary').textContent =
-    `Nguồn dữ liệu: ${loadedFiles.map(f => f.name).join(', ')} — tổng ${RAW.length} lệnh (đã loại trùng theo mã lệnh)`;
+    `Nguồn dữ liệu: ${loadedFiles.map(f => f.name).join(', ')} — tổng ${fmtInt(RAW.length)} lệnh (đã loại trùng theo mã lệnh)`;
 
   populateFilterOptions();
   applyFilters();
@@ -506,7 +526,7 @@ async function loadFromSheet({ silent = false } = {}) {
 
     // Thay thế dòng nguồn cũ của Sheet thay vì chồng thêm mỗi lần tải lại.
     const i = loadedFiles.findIndex((f) => f.fromSheet);
-    const entry = { name: `Google Sheet (${list.length} lệnh)`, count: list.length, added, fromSheet: true };
+    const entry = { name: `Google Sheet (${fmtInt(list.length)} lệnh)`, count: list.length, added, fromSheet: true };
     if (i >= 0) loadedFiles[i] = entry; else loadedFiles.unshift(entry);
 
     if (!finishLoad() && !silent) alert('Kho trên Google Sheet chưa có lệnh nào.');
@@ -577,7 +597,7 @@ function applyFilters() {
     return true;
   });
 
-  $('#filterCount').textContent = `${FILTERED.length} / ${RAW.length} lệnh`;
+  $('#filterCount').textContent = `${fmtInt(FILTERED.length)} / ${fmtInt(RAW.length)} lệnh`;
   logState.page = 0;
   render();
 }
@@ -983,8 +1003,10 @@ function renderLogTable() {
   const start = logState.page * LOG_PAGE_SIZE;
   const pageRows = list.slice(start, start + LOG_PAGE_SIZE);
 
-  $('#rowCount').textContent = `${list.length} lệnh`;
-  $('#logPageInfo').textContent = `Trang ${logState.page + 1}/${totalPages}`;
+  const from = list.length ? start + 1 : 0;
+  const to = Math.min(start + LOG_PAGE_SIZE, list.length);
+  $('#logPageInfo').textContent =
+    `${fmtInt(from)}–${fmtInt(to)} / ${fmtInt(list.length)} lệnh · Trang ${fmtInt(logState.page + 1)}/${fmtInt(totalPages)}`;
   $('#logPrev').disabled = logState.page === 0;
   $('#logNext').disabled = logState.page >= totalPages - 1;
 
