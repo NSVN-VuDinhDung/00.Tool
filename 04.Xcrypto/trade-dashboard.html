@@ -182,7 +182,8 @@
     </div>
     <div class="top-actions">
       <button class="btn" id="themeToggle">Chế độ sáng</button>
-      <button class="btn primary" id="loadBtn">Tải file JSON…</button>
+      <button class="btn primary" id="sheetBtn">Tải từ Google Sheet</button>
+      <button class="btn" id="loadBtn">Tải file JSON…</button>
       <button class="btn" id="clearBtn" style="display:none">Xoá dữ liệu đã tải</button>
       <input type="file" id="fileInput" accept="application/json,.json" multiple>
     </div>
@@ -190,8 +191,9 @@
 
   <div id="emptyState">
     <h2>Chưa có dữ liệu</h2>
-    <p>Chọn (hoặc kéo-thả) một hoặc NHIỀU file JSON — ví dụ toàn bộ các file lưu theo tuần từ extension tự động. Dashboard sẽ tự gộp và loại trùng theo mã lệnh. Mọi tính toán chạy hoàn toàn trên máy bạn, không gửi dữ liệu đi đâu cả.</p>
-    <button class="btn primary" id="loadBtn2">Chọn file JSON…</button>
+    <p>Lấy thẳng từ kho trên Google Sheet, hoặc chọn (kéo-thả) một hay NHIỀU file JSON. Dashboard tự gộp và loại trùng theo mã lệnh. Mọi tính toán chạy hoàn toàn trên máy bạn.</p>
+    <button class="btn primary" id="sheetBtn2">Tải từ Google Sheet</button>
+    <button class="btn" id="loadBtn2">Chọn file JSON…</button>
     <div id="loadSummary" style="margin-top:16px;font-size:12.5px;color:var(--text-dim);font-family:var(--mono)"></div>
   </div>
 
@@ -412,39 +414,107 @@ async function handleFiles(fileList) {
     const list = extractList(json);
     if (!list) { errors.push(`"${file.name}": không tìm thấy danh sách trade`); continue; }
 
-    let added = 0;
-    for (const t of list) {
-      if (t && t.id !== undefined && !rawById.has(t.id)) {
-        rawById.set(t.id, t);
-        added++;
-      }
-    }
+    const added = ingest(list);
     addedTotal += added;
     loadedFiles.push({ name: file.name, count: list.length, added });
   }
 
   if (errors.length) alert('Một số file có vấn đề:\n' + errors.join('\n'));
 
+  if (!finishLoad()) alert('Không có trade hợp lệ nào trong (các) file đã chọn.');
+}
+
+/** Gộp một danh sách trade thô vào kho, bỏ qua id đã có. Trả về số lệnh mới. */
+function ingest(list) {
+  let added = 0;
+  for (const t of list) {
+    if (t && t.id !== undefined && !rawById.has(t.id)) {
+      rawById.set(t.id, t);
+      added++;
+    }
+  }
+  return added;
+}
+
+/** Dựng lại RAW từ kho rồi vẽ. Dùng chung cho cả nguồn file lẫn nguồn Google Sheet. */
+function finishLoad() {
   RAW = Array.from(rawById.values())
     .map(normalizeTrade)
     .filter((t) => t.closed_date instanceof Date && !isNaN(t.closed_date));
 
-  if (RAW.length === 0) {
-    alert('Không có trade hợp lệ nào trong (các) file đã chọn.');
-    return;
-  }
+  if (RAW.length === 0) return false;
 
   $('#emptyState').style.display = 'none';
   $('#app').classList.add('visible');
   $('#clearBtn').style.display = 'inline-block';
 
-  const summaryText = `Đã gộp ${loadedFiles.length} file → ${RAW.length} lệnh duy nhất` +
-    (addedTotal < files.reduce((s,f)=>s+1,0) ? '' : '');
   $('#mergeSummary').textContent =
     `Nguồn dữ liệu: ${loadedFiles.map(f => f.name).join(', ')} — tổng ${RAW.length} lệnh (đã loại trùng theo mã lệnh)`;
 
   populateFilterOptions();
   applyFilters();
+  return true;
+}
+
+/* ============================================================
+   NGUỒN GOOGLE SHEET (Apps Script Web App)
+============================================================ */
+const SHEET_URL = 'https://script.google.com/macros/s/AKfycbz051ONLI5_jXv3ncphlK7FxM9pXg96TGdqX6XDyGi1bUEQrD6CzAzu_BuCHvvzZxff/exec';
+const SECRET_KEY = 'tradeSheetSecret';
+
+// SECRET nằm trong localStorage của chính trình duyệt này, không nằm trong file HTML,
+// để file còn chia sẻ hay commit được mà không lộ.
+function storedSecret() {
+  try { return localStorage.getItem(SECRET_KEY) || ''; } catch (e) { return ''; }
+}
+function saveSecret(s) {
+  try { localStorage.setItem(SECRET_KEY, s); } catch (e) {}
+}
+function clearSecret() {
+  try { localStorage.removeItem(SECRET_KEY); } catch (e) {}
+}
+
+const sheetButtons = () => ['#sheetBtn', '#sheetBtn2'].map((s) => $(s)).filter(Boolean);
+
+async function loadFromSheet({ silent = false } = {}) {
+  let secret = storedSecret();
+  if (!secret) {
+    if (silent) return;
+    secret = (prompt('Nhập SECRET của Apps Script (giống trong Code.gs):', '') || '').trim();
+    if (!secret) return;
+  }
+
+  const btns = sheetButtons();
+  btns.forEach((b) => { b.disabled = true; b.dataset.label = b.textContent; b.textContent = 'Đang tải…'; });
+
+  try {
+    const res = await fetch(`${SHEET_URL}?k=${encodeURIComponent(secret)}`);
+    if (!res.ok) throw new Error(`Sheet trả HTTP ${res.status}`);
+
+    const json = await res.json();
+    if (json.ok === false) {
+      if (json.error === 'BAD_SECRET') {
+        clearSecret();
+        throw new Error('SECRET không đúng. Bấm lại nút để nhập lại.');
+      }
+      throw new Error(json.error);
+    }
+
+    const list = extractList(json) || [];
+    const added = ingest(list);
+    saveSecret(secret);
+
+    // Thay thế dòng nguồn cũ của Sheet thay vì chồng thêm mỗi lần tải lại.
+    const i = loadedFiles.findIndex((f) => f.fromSheet);
+    const entry = { name: `Google Sheet (${list.length} lệnh)`, count: list.length, added, fromSheet: true };
+    if (i >= 0) loadedFiles[i] = entry; else loadedFiles.unshift(entry);
+
+    if (!finishLoad() && !silent) alert('Kho trên Google Sheet chưa có lệnh nào.');
+  } catch (err) {
+    if (!silent) alert('Không tải được từ Google Sheet:\n' + err.message);
+  } finally {
+    btns.forEach((b) => { b.disabled = false; b.textContent = b.dataset.label || 'Tải từ Google Sheet'; });
+  }
 }
 
 function resetData() {
@@ -461,6 +531,8 @@ function resetData() {
 
 $('#loadBtn').addEventListener('click', () => $('#fileInput').click());
 $('#loadBtn2').addEventListener('click', () => $('#fileInput').click());
+$('#sheetBtn').addEventListener('click', () => loadFromSheet());
+$('#sheetBtn2').addEventListener('click', () => loadFromSheet());
 $('#clearBtn').addEventListener('click', resetData);
 $('#fileInput').addEventListener('change', (e) => {
   if (e.target.files.length) handleFiles(e.target.files);
@@ -682,7 +754,7 @@ function renderEquityChart() {
   // x axis labels (first / mid / last)
   [0, Math.floor(points.length/2), points.length-1].forEach((i) => {
     const lbl = svgEl('text', { x: x(i), y: H - 6, 'font-size': 10, 'text-anchor': i===0?'start':(i===points.length-1?'end':'middle') });
-    lbl.textContent = dateFmt(points[i].closed_at);
+    lbl.textContent = dateFmt(points[i].date);
     svg.appendChild(lbl);
   });
 
@@ -970,6 +1042,10 @@ function renderStaticTable(selector, data, cols) {
 }
 
 window.addEventListener('resize', () => { if (RAW.length) render(); });
+
+// Đã lưu SECRET rồi thì mở trang là có số liệu ngay, không phải chọn file.
+// Lỗi thì im lặng, để nguyên màn hình trống cho người dùng tự bấm.
+loadFromSheet({ silent: true });
 </script>
 </body>
 </html>

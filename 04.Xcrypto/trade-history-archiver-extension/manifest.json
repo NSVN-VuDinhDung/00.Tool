@@ -1,15 +1,29 @@
 {
   "manifest_version": 3,
   "name": "Trade History Auto-Archiver",
-  "version": "1.0.0",
-  "description": "Tự động lấy và lưu trữ lịch sử trade từ xcrypto365.com theo lịch định kỳ, phòng trường hợp dữ liệu bị xoá khỏi hệ thống.",
-  "permissions": ["alarms", "downloads", "storage"],
-  "host_permissions": ["https://xcrypto365.com/*"],
+  "version": "1.2.0",
+  "description": "Tự động lấy và lưu trữ lịch sử trade từ xcrypto365.com theo lịch định kỳ, đẩy lên Google Sheet làm kho tổng, phòng trường hợp dữ liệu bị xoá khỏi hệ thống.",
+  "permissions": ["alarms", "downloads", "storage", "notifications"],
+  "host_permissions": [
+    "https://xcrypto365.com/*",
+    "https://script.google.com/*",
+    "https://script.googleusercontent.com/*"
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "background": {
     "service_worker": "background.js"
   },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Trade History Auto-Archiver"
+    "default_title": "Trade History Auto-Archiver",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
   }
 }

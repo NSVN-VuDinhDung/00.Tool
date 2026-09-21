@@ -4,39 +4,67 @@
 <meta charset="UTF-8">
 <style>
   body{
-    width:300px;margin:0;padding:16px;
+    width:320px;margin:0;padding:16px;
     font-family:-apple-system,"Segoe UI",sans-serif;
     background:#141c18;color:#e9efe9;
   }
   h1{font-size:13px;margin:0 0 14px;letter-spacing:.03em;color:#8fa091;font-weight:600;}
-  .row{display:flex;justify-content:space-between;margin-bottom:8px;font-size:12.5px;}
-  .row span:first-child{color:#8fa091;}
+  h2{
+    font-size:11px;margin:18px 0 8px;letter-spacing:.06em;color:#5c6c60;
+    font-weight:600;text-transform:uppercase;
+    border-top:1px solid #26332b;padding-top:12px;
+  }
+  .row{display:flex;justify-content:space-between;margin-bottom:8px;font-size:12.5px;gap:10px;}
+  .row span:first-child{color:#8fa091;flex-shrink:0;}
+  .row span:last-child{text-align:right;}
   label{display:block;font-size:12px;color:#8fa091;margin-top:10px;margin-bottom:4px;}
-  select, button{
+  select, button, input[type=password]{
     width:100%;padding:8px;border-radius:6px;border:1px solid #26332b;
     background:#1a231d;color:#e9efe9;font-size:13px;box-sizing:border-box;
+    font-family:inherit;
   }
   button{
     background:#1d5c3d;border-color:#3ddc84;color:#3ddc84;font-weight:600;
     cursor:pointer;margin-top:14px;
   }
+  button.ghost{background:#1a231d;border-color:#26332b;color:#8fa091;margin-top:8px;}
   button:disabled{opacity:.6;cursor:default;}
   .ok{color:#3ddc84;}
   .err{color:#ff6a5f;}
-  #lastError{
-    font-size:11.5px;color:#ffd7d2;margin-top:10px;background:#5c2a26;
-    padding:8px;border-radius:6px;display:none;line-height:1.4;
+  .warn{color:#e8b95b;}
+  .msg{
+    font-size:11.5px;margin-top:10px;padding:8px;border-radius:6px;
+    display:none;line-height:1.4;
   }
-  .hint{font-size:11px;color:#5c6c60;margin-top:14px;line-height:1.5;}
+  .msg.bad{color:#ffd7d2;background:#5c2a26;}
+  .msg.good{color:#d2ffe4;background:#1d5c3d;}
+  .msg.warn{color:#ffeccc;background:#5c4a1e;}
+  #staleWarn{margin-top:0;margin-bottom:12px;}
+  .hint{font-size:11px;color:#5c6c60;margin-top:10px;line-height:1.5;}
 </style>
 </head>
 <body>
   <h1>TRADE HISTORY AUTO-ARCHIVER</h1>
+
+  <div id="staleWarn" class="msg warn"></div>
+
   <div class="row"><span>Lần chạy gần nhất</span><span id="lastRun">—</span></div>
   <div class="row"><span>Kết quả</span><span id="lastStatus">—</span></div>
   <div class="row"><span>Số lệnh lấy được</span><span id="lastCount">—</span></div>
-  <div id="lastError"></div>
+  <div id="lastError" class="msg bad"></div>
 
+  <h2>Kho trên Google Sheet</h2>
+  <div class="row"><span>Đẩy lên gần nhất</span><span id="syncRun">—</span></div>
+  <div class="row"><span>Lệnh mới thêm</span><span id="syncAdded">—</span></div>
+  <div class="row"><span>Tổng trong kho</span><span id="syncTotal">—</span></div>
+  <div id="syncError" class="msg bad"></div>
+
+  <label for="secret">SECRET (khớp với Code.gs trên Apps Script)</label>
+  <input type="password" id="secret" placeholder="dán SECRET vào đây" autocomplete="off">
+  <button class="ghost" id="testBtn">Lưu &amp; kiểm tra kết nối</button>
+  <div id="testMsg" class="msg"></div>
+
+  <h2>Lịch chạy</h2>
   <label for="interval">Tần suất tự động</label>
   <select id="interval">
     <option value="1440">Mỗi ngày</option>
@@ -45,12 +73,18 @@
     <option value="20160">Mỗi 2 tuần</option>
   </select>
 
+  <label for="backupMode">Tải file JSON về máy</label>
+  <select id="backupMode">
+    <option value="onerror">Chỉ khi đẩy lên Sheet lỗi</option>
+    <option value="always">Mỗi lần chạy</option>
+    <option value="never">Không bao giờ</option>
+  </select>
+
   <button id="runNow">Chạy ngay</button>
 
   <div class="hint">
-    File JSON sẽ tự lưu vào thư mục Download mặc định của Chrome, trong thư mục con
-    <b>TradeHistoryArchive</b>. Muốn lưu ở nơi khác (VD: thư mục Google Drive để tự đồng bộ),
-    đổi thư mục Download mặc định trong Cài đặt Chrome.
+    Google Sheet là kho chính. File JSON chỉ là bản cứu hộ khi không đẩy lên Sheet được,
+    nên thư mục <b>TradeHistoryArchive</b> sẽ không còn phình ra mỗi tuần nữa.
   </div>
 
   <script src="popup.js"></script>
