@@ -14,10 +14,9 @@
   const CONFIG = {
     baseUrl: "https://xcrypto365.com/api/v1/trade-history",
     pageSize: 100, // càng lớn càng ít request, API có vẻ chấp nhận page_size tùy ý
-    // Trang mẫu bạn gửi lọc theo closed_by=system. Nếu muốn lấy TẤT CẢ (kể cả
-    // trade đóng thủ công), để mảng này gồm cả 'system' và 'user'.
-    // Nếu để [null] script sẽ gọi API KHÔNG kèm tham số closed_by.
-    closedByValues: ["system", "user"],
+    // "all" là giá trị chính trang web dùng để lấy mọi lệnh (system, manual, ...).
+    // KHÔNG để [null]: thiếu closed_by thì API mặc định chỉ trả lệnh system.
+    closedByValues: ["all"],
     delayMsBetweenRequests: 250,
   };
 

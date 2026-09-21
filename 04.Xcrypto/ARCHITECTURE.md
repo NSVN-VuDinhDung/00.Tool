@@ -113,7 +113,7 @@ ngoài chính request đọc Sheet.
 ```
 alarm đến hạn
  └─ runCrawl()                              background.js:220
-     ├─ lặp closedBy ∈ {system, user}
+     ├─ closed_by=all (thiếu tham số thì API chỉ trả system)
      │   └─ lặp page: GET trade-history?page=N&page_size=100
      │        ├─ 401/403 → ném AUTH_EXPIRED         ← dừng, KHÔNG ghi gì
      │        └─ gom vào allTrades, khử trùng theo id
@@ -241,7 +241,7 @@ Bấm Save trong trình soạn thảo **không** làm URL chạy code mới. B�
   "opened_at": "2026-09-20T07:16:14.809048+00:00",
   "closed_at": "2026-09-20T07:33:02.592624+00:00",
   "opened_by": "system",
-  "closed_by": "system",          // system | user
+  "closed_by": "system",          // system | manual | ... (crawl bằng closed_by=all)
   "entry_price": "0.00436600",    // CHUỖI, không phải số
   "exit_price":  "0.00410800",
   "dca_count": 0,

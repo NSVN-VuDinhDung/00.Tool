@@ -1,8 +1,9 @@
 const CONFIG = {
   baseUrl: "https://xcrypto365.com/api/v1/trade-history",
   pageSize: 100,
-  // Lấy cả lệnh đóng tự động (system) và đóng thủ công (user).
-  closedByValues: ["system", "user"],
+  // "all" là giá trị chính trang web dùng để lấy mọi lệnh (system, manual, ...).
+  // KHÔNG bỏ tham số: thiếu closed_by thì API mặc định chỉ trả lệnh system.
+  closedByValues: ["all"],
   delayMs: 250,
   alarmName: "weeklyTradeCrawl",
   defaultIntervalMinutes: 10080, // 7 ngày
