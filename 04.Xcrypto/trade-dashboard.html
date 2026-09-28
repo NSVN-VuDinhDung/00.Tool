@@ -508,7 +508,7 @@ async function loadFromSheet({ silent = false } = {}) {
   btns.forEach((b) => { b.disabled = true; b.dataset.label = b.textContent; b.textContent = 'Đang tải…'; });
 
   try {
-    const res = await fetch(`${SHEET_URL}?k=${encodeURIComponent(secret)}`);
+    const res = await fetch(`${SHEET_URL}?k=${encodeURIComponent(secret)}`, { cache: 'no-store' });
     if (!res.ok) throw new Error(`Sheet trả HTTP ${res.status}`);
 
     const json = await res.json();
