@@ -87,7 +87,7 @@
     padding:12px 14px;margin-bottom:22px;
   }
   .filterbar label{font-size:12px;color:var(--text-faint);display:block;margin-bottom:3px;}
-  .filterbar select, .filterbar input[type=date]{
+  .filterbar select, .filterbar input[type=datetime-local]{
     background:var(--panel-2);border:1px solid var(--border);color:var(--text);
     border-radius:6px;padding:6px 8px;font-family:var(--sans);font-size:13px;
   }
@@ -110,6 +110,7 @@
   .hero .cell .label{font-size:12px;color:var(--text-faint);margin-bottom:8px;}
   .hero .cell .value{font-family:var(--mono);font-size:28px;font-weight:600;letter-spacing:-0.01em;}
   .hero .cell .sub{font-size:12px;color:var(--text-dim);margin-top:6px;font-family:var(--mono);}
+  .hero-title{font-size:12px;color:var(--text-faint);margin:0 0 6px 2px;text-transform:uppercase;letter-spacing:0.04em;}
   .pos{color:var(--profit);}
   .neg{color:var(--loss);}
 
@@ -218,6 +219,9 @@
 
     <div id="mergeSummary" style="font-size:12px;color:var(--text-faint);font-family:var(--mono);margin-bottom:10px;"></div>
 
+    <div class="hero-title">Tổng toàn bộ (không áp bộ lọc)</div>
+    <div class="hero" id="totalStats"></div>
+
     <div class="filterbar">
       <div class="fgroup">
         <label>Coin</label>
@@ -232,12 +236,23 @@
         </select>
       </div>
       <div class="fgroup">
-        <label>Từ ngày</label>
-        <input type="date" id="fFrom">
+        <label>Khoảng thời gian</label>
+        <select id="fPeriod">
+          <option value="">Tất cả</option>
+          <option value="today" selected>Hôm nay</option>
+          <option value="week">Tuần này</option>
+          <option value="month">Tháng này</option>
+          <option value="year">Năm nay</option>
+          <option value="custom">Tùy chọn</option>
+        </select>
       </div>
       <div class="fgroup">
-        <label>Đến ngày</label>
-        <input type="date" id="fTo">
+        <label>Từ lúc</label>
+        <input type="datetime-local" id="fFrom">
+      </div>
+      <div class="fgroup">
+        <label>Đến lúc</label>
+        <input type="datetime-local" id="fTo">
       </div>
       <div class="fgroup">
         <label>DCA</label>
@@ -252,6 +267,7 @@
       <div class="count" id="filterCount"></div>
     </div>
 
+    <div class="hero-title" id="heroTitle">Theo bộ lọc</div>
     <div class="hero" id="heroStats"></div>
 
     <div class="section">
@@ -311,6 +327,7 @@
 
     <div class="section">
       <h2>Toàn bộ lệnh</h2>
+      <div class="desc">Tất cả lệnh đã tải, không áp bộ lọc phía trên.</div>
       <div class="search-row">
         <input type="text" id="searchBox" placeholder="Tìm theo coin…">
       </div>
@@ -584,7 +601,8 @@ function applyFilters() {
   const symbol = $('#fSymbol').value;
   const side = $('#fSide').value;
   const from = $('#fFrom').value ? new Date($('#fFrom').value) : null;
-  const to = $('#fTo').value ? new Date($('#fTo').value + 'T23:59:59') : null;
+  // Ô chỉ chọn tới phút, nên "đến 23:59" phải bao cả lệnh đóng lúc 23:59:59.999.
+  const to = $('#fTo').value ? new Date(new Date($('#fTo').value).getTime() + 59999) : null;
   const dca = $('#fDca').value;
 
   FILTERED = RAW.filter((t) => {
@@ -598,16 +616,58 @@ function applyFilters() {
   });
 
   $('#filterCount').textContent = `${fmtInt(FILTERED.length)} / ${fmtInt(RAW.length)} lệnh`;
-  logState.page = 0;
   render();
 }
 
-['#fSymbol','#fSide','#fFrom','#fTo','#fDca'].forEach((sel) => {
+['#fSymbol','#fSide','#fDca'].forEach((sel) => {
   $(sel).addEventListener('change', applyFilters);
+});
+// Sửa tay giờ bắt đầu/kết thúc thì không còn là khoảng nhanh nào nữa.
+['#fFrom','#fTo'].forEach((sel) => {
+  $(sel).addEventListener('change', () => {
+    $('#fPeriod').value = 'custom';
+    applyFilters();
+  });
+});
+
+const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+
+/** Điền Từ lúc/Đến lúc theo khoảng nhanh, trọn từ 00:00 ngày đầu đến 23:59 ngày cuối (giờ máy). Tuần tính từ thứ Hai. */
+function setPeriodRange(period) {
+  const now = new Date();
+  let start, end;
+  if (period === 'today') {
+    start = end = now;
+  } else if (period === 'week') {
+    start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - ((now.getDay() + 6) % 7));
+    end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6);
+  } else if (period === 'month') {
+    start = new Date(now.getFullYear(), now.getMonth(), 1);
+    end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  } else if (period === 'year') {
+    start = new Date(now.getFullYear(), 0, 1);
+    end = new Date(now.getFullYear(), 11, 31);
+  } else if (period === '') {
+    $('#fFrom').value = '';
+    $('#fTo').value = '';
+    return;
+  } else {
+    return; // 'custom': giữ nguyên giá trị đang có
+  }
+  $('#fFrom').value = `${ymd(start)}T00:00`;
+  $('#fTo').value = `${ymd(end)}T23:59`;
+}
+// Mặc định xem ngày hôm nay; chỉ đặt một lần khi mở trang để tải lại Sheet không ghi đè lựa chọn của người dùng.
+setPeriodRange($('#fPeriod').value);
+
+$('#fPeriod').addEventListener('change', () => {
+  setPeriodRange($('#fPeriod').value);
+  applyFilters();
 });
 $('#resetFilters').addEventListener('click', () => {
   $('#fSymbol').value = '';
   $('#fSide').value = '';
+  $('#fPeriod').value = '';
   $('#fFrom').value = '';
   $('#fTo').value = '';
   $('#fDca').value = '';
@@ -635,7 +695,16 @@ function render() {
    HERO
 ============================================================ */
 function renderHero() {
-  const list = FILTERED;
+  $('#totalStats').innerHTML = heroCells(RAW);
+  $('#heroStats').innerHTML = heroCells(FILTERED);
+  const from = $('#fFrom').value, to = $('#fTo').value;
+  $('#heroTitle').textContent = from || to
+    ? `Theo bộ lọc: ${from ? dateTimeFmt(from) : '…'} → ${to ? dateTimeFmt(to) : '…'}`
+    : 'Theo bộ lọc';
+}
+
+/** Bốn ô thống kê (lãi/lỗ, số lệnh, tỷ lệ thắng, thời gian giữ) cho một danh sách lệnh. */
+function heroCells(list) {
   const totalNet = list.reduce((s, t) => s + t.net_pnl, 0);
   const totalGross = list.reduce((s, t) => s + t.realized_pnl, 0);
   const totalFees = list.reduce((s, t) => s + t.total_fees, 0);
@@ -645,7 +714,7 @@ function renderHero() {
   const avgPnl = list.length ? totalNet / list.length : 0;
   const avgDurH = list.length ? (list.reduce((s,t)=>s+t.duration_ms,0) / list.length) / 3600000 : 0;
 
-  $('#heroStats').innerHTML = `
+  return `
     <div class="cell">
       <div class="label">Lãi/lỗ ròng</div>
       <div class="value ${cls(totalNet)}">${fmtSigned(totalNet)}</div>
@@ -987,7 +1056,8 @@ const logCols = [
 
 function renderLogTable() {
   const q = ($('#searchBox').value || '').trim().toUpperCase();
-  const list = FILTERED.filter((t) => !q || t.symbol.toUpperCase().includes(q));
+  // Bảng này luôn lấy RAW: là danh sách lệnh độc lập, không đi theo bộ lọc của dashboard phía trên.
+  const list = RAW.filter((t) => !q || t.symbol.toUpperCase().includes(q));
 
   list.sort((a, b) => {
     const va = a[logState.sortKey], vb = b[logState.sortKey];
