@@ -11,6 +11,9 @@
  * hiện tại chứ không phải lịch sử, nên mỗi lần ghi là ghi đè. Nó nằm ở sheet riêng,
  * không đụng tới sheet "trades".
  *
+ * Sheet "withdrawals" (lịch sử rút tiền, nhập tay) cũng sửa được dòng đã có, nhưng
+ * "xoá" chỉ là đánh dấu status = deleted — dòng vẫn nằm trong Sheet.
+ *
  * Xem hướng dẫn cài đặt trong README.md cùng thư mục.
  */
 
@@ -22,6 +25,14 @@ const SNAPSHOT_SHEET_NAME = 'snapshot';
 
 /** Một ô Sheets chứa tối đa 50.000 ký tự, nên JSON dài được cắt thành nhiều ô. */
 const SNAPSHOT_CHUNK = 40000;
+
+const WITHDRAW_SHEET_NAME = 'withdrawals';
+/**
+ * type: "out" = rút từ future ra spot, "in" = nạp thêm vào future,
+ *       "capital" = vốn ban đầu (chỉ một dòng, id cố định "capital").
+ * status: "active" | "deleted".
+ */
+const WITHDRAW_COLUMNS = ['id', 'at', 'type', 'amount', 'note', 'status', 'created_at', 'updated_at'];
 
 /** Thứ tự cột trong Sheet. KHÔNG đổi thứ tự sau khi đã có dữ liệu. */
 const COLUMNS = [
@@ -52,7 +63,10 @@ function doGet(e) {
 
   const sh = ensureSheet();
   const last = sh.getLastRow();
-  if (last < 2) return json({ ok: true, exported_at: nowIso(), total: 0, trades: [], snapshot: snapshot });
+  const withdrawals = readWithdrawals();
+  if (last < 2) {
+    return json({ ok: true, exported_at: nowIso(), total: 0, trades: [], snapshot: snapshot, withdrawals: withdrawals });
+  }
 
   const values = sh.getRange(2, 1, last - 1, COLUMNS.length).getValues();
   const trades = values.map(rowToTrade);
@@ -64,12 +78,18 @@ function doGet(e) {
     return 0;
   });
 
-  return json({ ok: true, exported_at: nowIso(), total: trades.length, trades: trades, snapshot: snapshot });
+  return json({
+    ok: true, exported_at: nowIso(), total: trades.length, trades: trades,
+    snapshot: snapshot, withdrawals: withdrawals,
+  });
 }
 
 /**
  * Ghi thêm: POST <URL>, body = { "secret": "...", "trades": [ ... ], "snapshot": { ... } }
  * Cả "trades" lẫn "snapshot" đều tuỳ chọn; có cái nào thì ghi cái đó.
+ *
+ * Ghi một lần rút tiền: body = { "secret": "...", "withdrawal": { id, at, type, amount, note, status } }
+ * Trả về toàn bộ danh sách sau khi ghi, để dashboard vẽ lại mà không phải tải lại cả kho.
  */
 function doPost(e) {
   var body;
@@ -84,7 +104,8 @@ function doPost(e) {
 
   const incoming = body.trades || [];
   const snapshot = body.snapshot && typeof body.snapshot === 'object' ? body.snapshot : null;
-  if (!incoming.length && !snapshot) return json({ ok: true, added: 0, received: 0 });
+  const withdrawal = body.withdrawal && typeof body.withdrawal === 'object' ? body.withdrawal : null;
+  if (!incoming.length && !snapshot && !withdrawal) return json({ ok: true, added: 0, received: 0 });
 
   // Chặn hai lần chạy đè lên nhau (alarm + bấm "Chạy ngay" cùng lúc).
   const lock = LockService.getScriptLock();
@@ -95,6 +116,11 @@ function doPost(e) {
   }
 
   try {
+    if (withdrawal) {
+      saveWithdrawal(withdrawal);
+      return json({ ok: true, withdrawal_saved: true, withdrawals: readWithdrawals() });
+    }
+
     if (snapshot) writeSnapshot(snapshot);
 
     const sh = ensureSheet();
@@ -178,6 +204,69 @@ function readSnapshot() {
   var text = '';
   for (var i = 0; i < vals.length; i++) text += String(vals[i][0]);
   try { return JSON.parse(text); } catch (err) { return null; }
+}
+
+/* ---------- lịch sử rút tiền (nhập tay từ dashboard) ---------- */
+
+function ensureWithdrawSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(WITHDRAW_SHEET_NAME);
+  if (!sh) sh = ss.insertSheet(WITHDRAW_SHEET_NAME);
+
+  if (sh.getLastRow() === 0) {
+    sh.getRange(1, 1, 1, WITHDRAW_COLUMNS.length).setValues([WITHDRAW_COLUMNS]).setFontWeight('bold');
+    sh.setFrozenRows(1);
+    // Ép text toàn bộ: ngày giờ ISO và ghi chú kiểu "=..." không bị Sheets tự diễn giải.
+    sh.getRange(2, 1, sh.getMaxRows() - 1, WITHDRAW_COLUMNS.length).setNumberFormat('@');
+  }
+  return sh;
+}
+
+/** Thêm mới, hoặc ghi đè dòng có cùng id (sửa / xoá / khôi phục). */
+function saveWithdrawal(w) {
+  const id = String(w.id || '');
+  const amount = num(w.amount);
+  const status = w.status === 'deleted' ? 'deleted' : 'active';
+  if (!id || !(amount > 0) || ['out', 'in', 'capital'].indexOf(w.type) < 0 || isNaN(new Date(w.at).getTime())) {
+    throw new Error('BAD_WITHDRAWAL');
+  }
+
+  const sh = ensureWithdrawSheet();
+  const last = sh.getLastRow();
+  var row = last + 1;
+  var createdAt = nowIso();
+  if (last >= 2) {
+    const vals = sh.getRange(2, 1, last - 1, WITHDRAW_COLUMNS.length).getValues();
+    for (var i = 0; i < vals.length; i++) {
+      if (String(vals[i][0]) !== id) continue;
+      row = i + 2;
+      createdAt = String(vals[i][WITHDRAW_COLUMNS.indexOf('created_at')]);
+      break;
+    }
+  }
+
+  sh.getRange(row, 1, 1, WITHDRAW_COLUMNS.length).setNumberFormat('@').setValues([[
+    id, new Date(w.at).toISOString(), w.type, String(amount),
+    String(w.note || '').slice(0, 500), status, createdAt, nowIso(),
+  ]]);
+}
+
+function readWithdrawals() {
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(WITHDRAW_SHEET_NAME);
+  if (!sh) return [];
+  const last = sh.getLastRow();
+  if (last < 2) return [];
+
+  const vals = sh.getRange(2, 1, last - 1, WITHDRAW_COLUMNS.length).getValues();
+  const list = [];
+  for (var i = 0; i < vals.length; i++) {
+    const o = {};
+    for (var c = 0; c < WITHDRAW_COLUMNS.length; c++) o[WITHDRAW_COLUMNS[c]] = String(vals[i][c]);
+    if (!o.id) continue;
+    o.amount = num(o.amount);
+    list.push(o);
+  }
+  return list;
 }
 
 /** Đọc nguyên cột id trong 1 lần gọi — đây là chỗ quyết định tốc độ. */

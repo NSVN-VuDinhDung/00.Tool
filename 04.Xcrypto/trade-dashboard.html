@@ -184,6 +184,41 @@
   .pager .count{font-size:12.5px;color:var(--text-dim);font-family:var(--mono);}
   .pager-nav{display:flex;gap:8px;margin-left:auto;}
   .pager-nav .btn{padding:6px 12px;font-size:13px;}
+  /* ---------- rút tiền ---------- */
+  .section-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;}
+  #wdTable td.left, #wdTable th.left{text-align:left;}
+  #wdTable tr.deleted td{color:var(--text-faint);text-decoration:line-through;}
+  #wdTable tr.deleted td:last-child{text-decoration:none;}
+  .link-btn{
+    background:none;border:none;color:var(--text-dim);font-family:var(--sans);font-size:12.5px;
+    cursor:pointer;padding:2px 6px;text-decoration:underline;
+  }
+  .link-btn:hover{color:var(--text);}
+  .pager label.count{display:flex;align-items:center;gap:6px;cursor:pointer;}
+
+  .modal{
+    position:fixed;inset:0;z-index:100;background:rgba(0,0,0,.6);
+    display:none;align-items:center;justify-content:center;padding:16px;
+  }
+  .modal.visible{display:flex;}
+  .modal-box{
+    background:var(--panel);border:1px solid var(--border);border-radius:12px;
+    padding:22px;width:100%;max-width:420px;
+  }
+  .modal-box h2{margin:0 0 16px;font-size:16px;font-weight:600;}
+  .modal-box .field{margin-bottom:14px;}
+  .modal-box .field > label{display:block;font-size:12px;color:var(--text-faint);margin-bottom:4px;}
+  .modal-box input[type=datetime-local], .modal-box input[type=number], .modal-box input[type=text]{
+    width:100%;background:var(--panel-2);border:1px solid var(--border);color:var(--text);
+    border-radius:6px;padding:8px 10px;font-family:var(--sans);font-size:14px;
+  }
+  .modal-box.capital-mode .move-only{display:none;}
+  #wdAmount{font-family:var(--mono);font-size:16px;}
+  .modal-box .radios{display:flex;gap:18px;font-size:13.5px;flex-wrap:wrap;}
+  .modal-box .radios label{display:flex;align-items:center;gap:6px;cursor:pointer;}
+  .modal-box .error{color:var(--loss);font-size:12.5px;min-height:18px;margin-bottom:10px;}
+  .modal-box .actions{display:flex;justify-content:flex-end;gap:10px;}
+
   .search-row input[type=text]{
     background:var(--panel-2);border:1px solid var(--border);color:var(--text);
     border-radius:6px;padding:7px 10px;font-family:var(--sans);font-size:13px;flex:1;min-width:180px;
@@ -233,6 +268,29 @@
 
     <div class="hero-title">Tổng toàn bộ (không áp bộ lọc)</div>
     <div class="hero" id="totalStats"></div>
+
+    <div class="section" id="withdrawSection">
+      <div class="section-head">
+        <div>
+          <h2>Rút tiền</h2>
+          <div class="desc" id="wdDesc"></div>
+        </div>
+        <div class="top-actions">
+          <button class="btn" id="wdCapital">Nhập vốn ban đầu</button>
+          <button class="btn primary" id="wdAdd">+ Ghi lần rút</button>
+        </div>
+      </div>
+      <div class="hero" id="wdStats"></div>
+      <div class="scroll-table"><table id="wdTable"></table></div>
+      <div class="pager">
+        <label class="count"><input type="checkbox" id="wdShowDeleted"> Hiện cả dòng đã xoá</label>
+        <span class="count" id="wdPageInfo"></span>
+        <div class="pager-nav">
+          <button class="btn" id="wdPrev">‹ Trước</button>
+          <button class="btn" id="wdNext">Sau ›</button>
+        </div>
+      </div>
+    </div>
 
     <div class="filterbar">
       <div class="fgroup">
@@ -356,6 +414,36 @@
   </div>
 
   <footer>Xử lý 100% trên trình duyệt của bạn — không upload lên server nào.</footer>
+</div>
+
+<div class="modal" id="wdModal">
+  <form class="modal-box" id="wdForm">
+    <h2 id="wdModalTitle">Ghi lần rút</h2>
+    <div class="field move-only">
+      <label>Loại</label>
+      <div class="radios">
+        <label><input type="radio" name="wdType" value="out" checked> Rút ra spot</label>
+        <label><input type="radio" name="wdType" value="in"> Nạp thêm vào future</label>
+      </div>
+    </div>
+    <div class="field move-only">
+      <label for="wdAt">Thời điểm</label>
+      <input type="datetime-local" id="wdAt" required>
+    </div>
+    <div class="field">
+      <label for="wdAmount">Số tiền (USDT)</label>
+      <input type="text" id="wdAmount" inputmode="decimal" autocomplete="off" placeholder="0.00" required>
+    </div>
+    <div class="field move-only">
+      <label for="wdNote">Ghi chú</label>
+      <input type="text" id="wdNote" maxlength="500" placeholder="tuỳ chọn">
+    </div>
+    <div class="error" id="wdError"></div>
+    <div class="actions">
+      <button type="button" class="btn" id="wdCancel">Huỷ bỏ</button>
+      <button type="submit" class="btn primary" id="wdSave">Lưu</button>
+    </div>
+  </form>
 </div>
 
 <div class="chart-tooltip" id="tooltip"></div>
@@ -559,6 +647,8 @@ async function loadFromSheet({ silent = false } = {}) {
       setSnapshot(json.snapshot);
       startLivePolling();
     }
+    // Code.gs bản cũ cũng không có trường này; khi đó khối "Rút tiền" tự khoá nút nhập.
+    setWithdrawals('withdrawals' in json ? json.withdrawals : null);
 
     // Thay thế dòng nguồn cũ của Sheet thay vì chồng thêm mỗi lần tải lại.
     const i = loadedFiles.findIndex((f) => f.fromSheet);
@@ -584,6 +674,7 @@ let liveTimer = null;
 
 function setSnapshot(snapshot) {
   SNAPSHOT = snapshot || null;
+  renderWithdraw(); // ô "Tổng tài sản" phụ thuộc số dư ví
   renderLive();
 }
 
@@ -699,10 +790,275 @@ function renderLive() {
   ], 'upnl');
 }
 
+/* ============================================================
+   RÚT TIỀN (nhập tay, lưu trên Google Sheet)
+   Mọi con số ở khối này tính lại từ danh sách mỗi lần vẽ, nên thêm / sửa / xoá
+   xong là số liệu đúng ngay, không có tổng nào được lưu sẵn.
+============================================================ */
+const WD_PAGE_SIZE = 10;
+// null = nguồn hiện tại không có lịch sử rút (file JSON, hoặc Code.gs bản cũ).
+let WITHDRAWALS = null;
+const wdState = { page: 0, sortKey: 'at', sortDir: -1, showDeleted: false, editingId: null, capitalMode: false };
+// Vốn ban đầu nằm chung sheet với các lần rút, là một dòng duy nhất có id cố định.
+const WD_CAPITAL_ID = 'capital';
+const capitalRecord = () => (WITHDRAWALS || []).find((w) => w.type === 'capital' && w.status !== 'deleted') || null;
+
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const usd = (v) => (num(v) < 0 ? '−' : '') + '$' + fmt(Math.abs(num(v)));
+// Rút ra là dương, nạp thêm là âm: dùng cho cột cộng dồn của bảng.
+const wdSigned = (w) => (w.type === 'in' ? -1 : 1) * num(w.amount);
+
+function setWithdrawals(list) {
+  WITHDRAWALS = Array.isArray(list) ? list : null;
+  renderWithdraw();
+}
+
+function renderWithdraw() {
+  const ready = WITHDRAWALS !== null;
+  $('#wdAdd').disabled = !ready;
+  $('#wdDesc').textContent = ready
+    ? 'Tiền chuyển từ ví future sang spot, nhập tay. Không đi theo bộ lọc phía dưới.'
+    : 'Chỉ có khi tải từ Google Sheet với Code.gs bản mới (dán Code.gs mới rồi Deploy version mới).';
+
+  const capital = capitalRecord();
+  $('#wdCapital').disabled = !ready;
+  $('#wdCapital').textContent = capital ? `Vốn ban đầu: ${usd(capital.amount)}` : 'Nhập vốn ban đầu';
+
+  const moves = (WITHDRAWALS || []).filter((w) => w.type !== 'capital');
+  const active = moves.filter((w) => w.status !== 'deleted');
+  const outs = active.filter((w) => w.type !== 'in');
+  const ins = active.filter((w) => w.type === 'in');
+  const sum = (list) => list.reduce((s, w) => s + num(w.amount), 0);
+  const withdrawn = sum(outs);
+  const added = sum(ins);
+
+  const now = new Date();
+  const monthOut = sum(outs.filter((w) => {
+    const d = new Date(w.at);
+    return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+  }));
+
+  // Vốn đã bỏ vào = vốn ban đầu + các lần nạp thêm. Lãi thực = tiền đang có + tiền đã rút − vốn.
+  const invested = capital ? num(capital.amount) + added : null;
+  const hasBalance = !!(SNAPSHOT && SNAPSHOT.stats);
+  const balance = hasBalance ? num(SNAPSHOT.stats.current_balance) : 0;
+  const profit = invested !== null && hasBalance ? balance + withdrawn - invested : null;
+
+  $('#wdStats').innerHTML = `
+    <div class="cell">
+      <div class="label">Vốn đã bỏ vào</div>
+      <div class="value">${invested === null ? '—' : usd(invested)}</div>
+      <div class="sub">${capital ? `ban đầu ${usd(capital.amount)} + nạp thêm ${usd(added)} (${ins.length} lần)` : 'chưa nhập vốn ban đầu'}</div>
+    </div>
+    <div class="cell">
+      <div class="label">Đã rút</div>
+      <div class="value">${usd(withdrawn)}</div>
+      <div class="sub">${outs.length} lần · tháng này ${usd(monthOut)}</div>
+    </div>
+    <div class="cell">
+      <div class="label">Lãi thực</div>
+      <div class="value ${profit === null ? '' : cls(profit)}">${profit === null ? '—' : fmtSigned(profit)}</div>
+      <div class="sub">${profit !== null
+        ? `ví ${usd(balance)} + đã rút ${usd(withdrawn)} − vốn ${usd(invested)} · ${fmtSigned((profit / invested) * 100, 1)}% trên vốn`
+        : (capital ? 'chưa có số dư ví từ extension' : 'cần vốn ban đầu và số dư ví')}</div>
+    </div>
+    <div class="cell">
+      <div class="label">Thu hồi vốn</div>
+      <div class="value ${invested && withdrawn >= invested ? 'pos' : ''}">${invested ? fmtPct((withdrawn / invested) * 100) : '—'}</div>
+      <div class="sub">${!invested ? 'chưa nhập vốn ban đầu'
+        : withdrawn >= invested ? `đã hoà vốn, rút dư ${usd(withdrawn - invested)}`
+        : `rút thêm ${usd(invested - withdrawn)} nữa là hoà vốn`}</div>
+    </div>
+  `;
+
+  // Cộng dồn luôn tính theo thứ tự thời gian, bất kể bảng đang sắp theo cột nào.
+  const cumById = {};
+  let cum = 0;
+  [...active].sort((a, b) => new Date(a.at) - new Date(b.at)).forEach((w) => { cum += wdSigned(w); cumById[w.id] = cum; });
+
+  const list = moves.filter((w) => wdState.showDeleted || w.status !== 'deleted');
+  const sortVal = (w) => (wdState.sortKey === 'amount' ? wdSigned(w) : wdState.sortKey === 'at' ? new Date(w.at).getTime() : w[wdState.sortKey]);
+  list.sort((a, b) => {
+    const va = sortVal(a), vb = sortVal(b);
+    if (va < vb) return -1 * wdState.sortDir;
+    if (va > vb) return 1 * wdState.sortDir;
+    return 0;
+  });
+
+  const totalPages = Math.max(1, Math.ceil(list.length / WD_PAGE_SIZE));
+  wdState.page = Math.min(Math.max(wdState.page, 0), totalPages - 1);
+  const start = wdState.page * WD_PAGE_SIZE;
+  const rows = list.slice(start, start + WD_PAGE_SIZE);
+
+  $('#wdPageInfo').textContent = list.length
+    ? `${fmtInt(start + 1)}–${fmtInt(Math.min(start + WD_PAGE_SIZE, list.length))} / ${fmtInt(list.length)} lần · Trang ${fmtInt(wdState.page + 1)}/${fmtInt(totalPages)}`
+    : '';
+  $('#wdPrev').disabled = wdState.page === 0;
+  $('#wdNext').disabled = wdState.page >= totalPages - 1;
+
+  const table = $('#wdTable');
+  if (!rows.length) {
+    table.innerHTML = `<tbody><tr><td class="left" style="padding:18px;text-align:center;color:var(--text-faint)">${ready ? 'Chưa ghi lần rút nào.' : '—'}</td></tr></tbody>`;
+    return;
+  }
+
+  const cols = [
+    { key: 'at', label: 'Thời điểm', cls: 'left' },
+    { key: 'type', label: 'Loại', cls: 'left' },
+    { key: 'amount', label: 'Số tiền', cls: 'num' },
+    { key: null, label: 'Cộng dồn', cls: 'num' },
+    { key: 'note', label: 'Ghi chú', cls: 'left' },
+    { key: null, label: '', cls: '' },
+  ];
+  table.innerHTML = `
+    <thead><tr>${cols.map((c) => `<th class="${c.cls} ${c.key && wdState.sortKey === c.key ? 'sorted' : ''}" ${c.key ? `data-key="${c.key}"` : 'style="cursor:default"'}>${c.label}</th>`).join('')}</tr></thead>
+    <tbody>${rows.map((w) => {
+      const deleted = w.status === 'deleted';
+      return `<tr class="${deleted ? 'deleted' : ''}">
+        <td class="left">${dateTimeFmt(w.at)}</td>
+        <td class="left ${deleted ? '' : (w.type === 'in' ? 'neg' : 'pos')}">${w.type === 'in' ? 'Nạp thêm' : 'Rút'}</td>
+        <td class="num">${w.type === 'in' ? '−' : ''}$${fmt(w.amount)}</td>
+        <td class="num">${deleted ? '—' : usd(cumById[w.id])}</td>
+        <td class="left">${esc(w.note)}</td>
+        <td>${deleted
+          ? `<button class="link-btn" data-act="restore" data-id="${esc(w.id)}">Khôi phục</button>`
+          : `<button class="link-btn" data-act="edit" data-id="${esc(w.id)}">Sửa</button><button class="link-btn" data-act="delete" data-id="${esc(w.id)}">Xoá</button>`}</td>
+      </tr>`;
+    }).join('')}</tbody>
+  `;
+}
+
+/** Gửi một bản ghi lên Sheet (thêm mới hoặc ghi đè theo id), nhận về danh sách mới nhất. */
+async function pushWithdrawal(record) {
+  const res = await fetch(SHEET_URL, {
+    method: 'POST',
+    // text/plain để tránh preflight, cùng cách extension đang làm.
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ secret: storedSecret(), withdrawal: record }),
+  });
+  if (!res.ok) throw new Error(`Sheet trả HTTP ${res.status}`);
+  const json = await res.json();
+  if (!json.ok) {
+    if (json.error === 'BAD_SECRET') throw new Error('SECRET không đúng.');
+    if (String(json.error).includes('BAD_WITHDRAWAL')) throw new Error('Apps Script không nhận bản ghi này — nếu đang nhập vốn ban đầu thì cần Deploy Code.gs bản mới.');
+    throw new Error(String(json.error));
+  }
+  if (!json.withdrawal_saved) throw new Error('Apps Script đang chạy Code.gs bản cũ — dán Code.gs mới rồi Deploy version mới.');
+  setWithdrawals(json.withdrawals);
+}
+
+/** "1234567.5" -> "1,234,567.5". Chỉ giữ chữ số và một dấu chấm thập phân, tối đa 2 số lẻ. */
+function formatAmountInput(raw) {
+  const clean = String(raw).replace(/[^\d.]/g, '');
+  const dot = clean.indexOf('.');
+  const int = (dot < 0 ? clean : clean.slice(0, dot)).replace(/^0+(?=\d)/, '');
+  const grouped = int.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  if (dot < 0) return grouped;
+  return `${grouped || '0'}.${clean.slice(dot + 1).replace(/\./g, '').slice(0, 2)}`;
+}
+const parseAmount = (s) => parseFloat(String(s).replace(/,/g, ''));
+
+// Định dạng ngay khi gõ, giữ con trỏ đứng sau đúng ký tự vừa gõ dù dấu phẩy chen vào.
+$('#wdAmount').addEventListener('input', (e) => {
+  const input = e.target;
+  const before = input.value.slice(0, input.selectionStart).replace(/,/g, '').length;
+  input.value = formatAmountInput(input.value);
+  let pos = 0;
+  for (let seen = 0; pos < input.value.length && seen < before; pos++) {
+    if (input.value[pos] !== ',') seen++;
+  }
+  input.setSelectionRange(pos, pos);
+});
+
+/** capitalMode: popup chỉ còn ô số tiền, dùng để nhập / sửa vốn ban đầu. */
+function openWdModal(record, capitalMode = false) {
+  wdState.capitalMode = capitalMode;
+  wdState.editingId = record ? record.id : null;
+  $('#wdForm').classList.toggle('capital-mode', capitalMode);
+  $('#wdModalTitle').textContent = capitalMode ? 'Vốn ban đầu' : record ? 'Sửa lần rút' : 'Ghi lần rút';
+  const d = record ? new Date(record.at) : new Date();
+  $('#wdAt').value = `${ymd(d)}T${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  document.querySelector(`input[name=wdType][value=${record && record.type === 'in' ? 'in' : 'out'}]`).checked = true;
+  $('#wdAmount').value = record ? formatAmountInput(record.amount) : '';
+  $('#wdNote').value = record ? record.note : '';
+  $('#wdError').textContent = '';
+  $('#wdModal').classList.add('visible');
+  $('#wdAmount').focus();
+}
+function closeWdModal() { $('#wdModal').classList.remove('visible'); }
+
+$('#wdAdd').addEventListener('click', () => openWdModal(null));
+$('#wdCapital').addEventListener('click', () => openWdModal(capitalRecord(), true));
+$('#wdCancel').addEventListener('click', closeWdModal);
+$('#wdModal').addEventListener('click', (e) => { if (e.target === $('#wdModal')) closeWdModal(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeWdModal(); });
+
+$('#wdForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const at = new Date($('#wdAt').value);
+  const amount = parseAmount($('#wdAmount').value);
+  if (isNaN(at.getTime())) { $('#wdError').textContent = 'Thời điểm không hợp lệ.'; return; }
+  if (!(amount > 0)) { $('#wdError').textContent = 'Số tiền phải lớn hơn 0.'; return; }
+
+  const record = {
+    id: wdState.editingId || `w-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    at: at.toISOString(),
+    type: document.querySelector('input[name=wdType]:checked').value,
+    amount,
+    note: $('#wdNote').value.trim(),
+    status: 'active',
+  };
+  if (wdState.capitalMode) Object.assign(record, { id: WD_CAPITAL_ID, type: 'capital', note: '' });
+
+  const btn = $('#wdSave');
+  btn.disabled = true; btn.textContent = 'Đang lưu…';
+  $('#wdError').textContent = '';
+  try {
+    await pushWithdrawal(record);
+    if (!wdState.editingId) wdState.page = 0;
+    closeWdModal();
+  } catch (err) {
+    // Giữ nguyên popup và nội dung đã nhập để bấm Lưu lại được.
+    $('#wdError').textContent = 'Không lưu được: ' + err.message;
+  } finally {
+    btn.disabled = false; btn.textContent = 'Lưu';
+  }
+});
+
+$('#wdTable').addEventListener('click', async (e) => {
+  const th = e.target.closest('th[data-key]');
+  if (th) {
+    const key = th.dataset.key;
+    if (wdState.sortKey === key) wdState.sortDir *= -1; else { wdState.sortKey = key; wdState.sortDir = -1; }
+    renderWithdraw();
+    return;
+  }
+  const btn = e.target.closest('button[data-act]');
+  if (!btn) return;
+  const record = (WITHDRAWALS || []).find((w) => w.id === btn.dataset.id);
+  if (!record) return;
+
+  if (btn.dataset.act === 'edit') { openWdModal(record); return; }
+
+  const deleting = btn.dataset.act === 'delete';
+  if (deleting && !confirm(`Xoá lần ${record.type === 'in' ? 'nạp thêm' : 'rút'} $${fmt(record.amount)} lúc ${dateTimeFmt(record.at)}?\nDòng này vẫn nằm trong Sheet và khôi phục lại được.`)) return;
+  btn.disabled = true;
+  try {
+    await pushWithdrawal({ ...record, status: deleting ? 'deleted' : 'active' });
+  } catch (err) {
+    alert('Không lưu được: ' + err.message);
+    btn.disabled = false;
+  }
+});
+$('#wdShowDeleted').addEventListener('change', (e) => { wdState.showDeleted = e.target.checked; wdState.page = 0; renderWithdraw(); });
+$('#wdPrev').addEventListener('click', () => { wdState.page--; renderWithdraw(); });
+$('#wdNext').addEventListener('click', () => { wdState.page++; renderWithdraw(); });
+
 function resetData() {
   clearInterval(liveTimer);
   liveTimer = null;
   setSnapshot(null);
+  setWithdrawals(null);
   loadedFiles.length = 0;
   rawById.clear();
   RAW = [];
@@ -828,6 +1184,7 @@ $('#resetFilters').addEventListener('click', () => {
 function render() {
   if (!FILTERED) return;
   renderHero();
+  renderWithdraw();
   renderEquityChart();
   renderWinrate();
   renderSideBlock();
