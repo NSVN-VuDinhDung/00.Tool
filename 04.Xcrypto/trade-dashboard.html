@@ -75,8 +75,10 @@
   #emptyState p{max-width:440px;margin:0 auto 22px;font-size:14px;color:var(--text-dim);}
   #dropzone.dragover{border-color:var(--profit);background:var(--panel);}
 
-  #app{display:none;}
-  #app.visible{display:block;}
+  #app, #liveSection{display:none;}
+  #app.visible, #liveSection.visible{display:block;}
+  #liveAge.stale{color:var(--accent);}
+  #positionsTable td.empty-row{padding:18px;text-align:center;color:var(--text-faint);font-size:13px;}
 
   /* ---------- filter bar ---------- */
   /* Căn đáy, không căn giữa: các .fgroup cao hơn vì có nhãn phía trên,
@@ -204,6 +206,16 @@
       <button class="btn" id="loadBtn">Tải file JSON…</button>
       <button class="btn" id="clearBtn" style="display:none">Xoá dữ liệu đã tải</button>
       <input type="file" id="fileInput" accept="application/json,.json" multiple>
+    </div>
+  </div>
+
+  <div id="liveSection">
+    <div class="hero-title">Hiện tại · <span id="liveAge"></span></div>
+    <div class="hero" id="liveStats"></div>
+    <div class="section">
+      <h2>Lệnh đang mở</h2>
+      <div class="desc">Giá và PnL là tại thời điểm extension chụp, không phải giá trực tiếp. Bấm tiêu đề cột để sắp xếp.</div>
+      <div class="scroll-table"><table id="positionsTable"></table></div>
     </div>
   </div>
 
@@ -541,6 +553,13 @@ async function loadFromSheet({ silent = false } = {}) {
     const added = ingest(list);
     saveSecret(secret);
 
+    // Code.gs bản cũ không trả trường này; khi đó không bật tự làm mới,
+    // vì nó sẽ kéo lại toàn bộ kho mỗi phút.
+    if ('snapshot' in json) {
+      setSnapshot(json.snapshot);
+      startLivePolling();
+    }
+
     // Thay thế dòng nguồn cũ của Sheet thay vì chồng thêm mỗi lần tải lại.
     const i = loadedFiles.findIndex((f) => f.fromSheet);
     const entry = { name: `Google Sheet (${fmtInt(list.length)} lệnh)`, count: list.length, added, fromSheet: true };
@@ -554,7 +573,136 @@ async function loadFromSheet({ silent = false } = {}) {
   }
 }
 
+/* ============================================================
+   HIỆN TẠI: SỐ DƯ VÍ + LỆNH ĐANG MỞ (extension chụp, Sheet giữ bản mới nhất)
+============================================================ */
+const LIVE_POLL_MS = 60000;
+// Extension chụp 5 phút một lần; quá 3 nhịp không có bản mới thì coi là số cũ.
+const LIVE_STALE_MS = 15 * 60000;
+let SNAPSHOT = null;
+let liveTimer = null;
+
+function setSnapshot(snapshot) {
+  SNAPSHOT = snapshot || null;
+  renderLive();
+}
+
+function startLivePolling() {
+  if (liveTimer) return;
+  liveTimer = setInterval(async () => {
+    const secret = storedSecret();
+    if (!secret) return;
+    try {
+      const res = await fetch(`${SHEET_URL}?k=${encodeURIComponent(secret)}&only=snapshot`, { cache: 'no-store' });
+      const json = await res.json();
+      if (json.ok) setSnapshot(json.snapshot);
+    } catch (e) {
+      renderLive(); // mất mạng: vẫn cập nhật dòng "x phút trước" để thấy số đang cũ dần
+    }
+  }, LIVE_POLL_MS);
+}
+
+function agoText(ms) {
+  const m = Math.floor(ms / 60000);
+  if (m < 1) return 'vừa xong';
+  if (m < 60) return `${m} phút trước`;
+  const h = Math.floor(m / 60);
+  return h < 48 ? `${h} giờ trước` : `${Math.floor(h / 24)} ngày trước`;
+}
+
+/** Khoảng cách từ giá hiện tại tới giá thanh lý, tính theo % giá hiện tại. */
+function liqDistance(p) {
+  const cur = num(p.current_price), liq = num(p.liquidation_price);
+  if (!(cur > 0) || !(liq > 0)) return null;
+  return (p.side === 'short' ? (liq - cur) / cur : (cur - liq) / cur) * 100;
+}
+
+const BINANCE_LABEL = {
+  'Connected': 'đã kết nối',
+  'Pending': 'đang chờ',
+  'Access-Denied': 'bị từ chối truy cập',
+  'Not-Configured': 'chưa cấu hình',
+  'Not-Connected': 'chưa kết nối',
+};
+
+function renderLive() {
+  const section = $('#liveSection');
+  if (!SNAPSHOT) { section.classList.remove('visible'); return; }
+  section.classList.add('visible');
+
+  const stats = SNAPSHOT.stats || {};
+  const positions = (SNAPSHOT.positions || []).map((p) => ({
+    ...p,
+    size: num(p.quantity) * num(p.average_entry_price),
+    avg_entry: num(p.average_entry_price),
+    cur: p.current_price ? num(p.current_price) : null,
+    tp: p.tp_price ? num(p.tp_price) : null,
+    liq: p.liquidation_price ? num(p.liquidation_price) : null,
+    liq_dist: liqDistance(p),
+    upnl: p.unrealized_pnl ? num(p.unrealized_pnl) : 0,
+  }));
+
+  const age = Date.now() - new Date(SNAPSHOT.taken_at).getTime();
+  const stale = age > LIVE_STALE_MS;
+  $('#liveAge').textContent = `chụp ${agoText(age)} (${dateTimeFmt(SNAPSHOT.taken_at)})` +
+    (stale ? ' — số đã cũ, kiểm tra Chrome có đang mở và extension còn đăng nhập không' : '');
+  $('#liveAge').classList.toggle('stale', stale);
+
+  const balance = num(stats.current_balance);
+  const today = num(stats.today_pnl);
+  const upnl = positions.reduce((s, p) => s + p.upnl, 0);
+  const longs = positions.filter((p) => p.side !== 'short').length;
+  const totalSize = positions.reduce((s, p) => s + p.size, 0);
+  const binance = BINANCE_LABEL[stats.binance_connection_status] || stats.binance_connection_status || '—';
+
+  $('#liveStats').innerHTML = `
+    <div class="cell">
+      <div class="label">Số dư ví</div>
+      <div class="value">$${fmt(balance)}</div>
+      <div class="sub">Binance: ${binance}${stats.balance_synced_at ? ` · đồng bộ ${dateTimeFmt(stats.balance_synced_at)}` : ''}</div>
+    </div>
+    <div class="cell">
+      <div class="label">Lãi/lỗ hôm nay</div>
+      <div class="value ${cls(today)}">${fmtSigned(today)}</div>
+      <div class="sub">${balance ? fmtSigned((today / balance) * 100) + '% số dư' : '—'}</div>
+    </div>
+    <div class="cell">
+      <div class="label">Lệnh đang mở</div>
+      <div class="value">${positions.length}</div>
+      <div class="sub">${longs} long / ${positions.length - longs} short · quy mô $${fmt(totalSize)}</div>
+    </div>
+    <div class="cell">
+      <div class="label">PnL chưa chốt</div>
+      <div class="value ${cls(upnl)}">${fmtSigned(upnl)}</div>
+      <div class="sub">${balance ? fmtSigned((upnl / balance) * 100) + '% số dư' : '—'}</div>
+    </div>
+  `;
+
+  if (positions.length === 0) {
+    $('#positionsTable').innerHTML = '<tbody><tr><td class="empty-row">Không có lệnh nào đang mở.</td></tr></tbody>';
+    return;
+  }
+
+  const price = (v) => (v === null ? '—' : fmt(v, 5));
+  renderSortableTable('#positionsTable', positions, [
+    { key: 'symbol', label: 'Coin', render: (r) => `<span class="symbol-tag">${r.symbol}</span>${r.leverage ? ` <span style="color:var(--text-faint)">${r.leverage}x</span>` : ''}` },
+    { key: 'side', label: 'Chiều', render: (r) => `<span class="${r.side==='short'?'side-short':'side-long'}">${r.side==='short'?'Short':'Long'}</span>` },
+    { key: 'size', label: 'Quy mô', num: true, render: (r) => fmt(r.size) },
+    { key: 'avg_entry', label: 'Giá vào TB', num: true, render: (r) => price(r.avg_entry) },
+    { key: 'cur', label: 'Giá hiện tại', num: true, render: (r) => price(r.cur) },
+    { key: 'tp', label: 'Giá TP', num: true, render: (r) => price(r.tp) },
+    { key: 'liq', label: 'Giá thanh lý', num: true, render: (r) => price(r.liq) },
+    { key: 'liq_dist', label: 'Cách thanh lý', num: true, render: (r) => r.liq_dist === null ? '—' : `<span class="${r.liq_dist < 10 ? 'neg' : ''}">${fmtPct(r.liq_dist)}</span>` },
+    { key: 'dca_count', label: 'DCA', num: true },
+    { key: 'upnl', label: 'PnL', num: true, render: (r) => `<span class="${cls(r.upnl)}">${fmtSigned(r.upnl)}</span>` },
+    { key: 'opened_at', label: 'Mở lúc', render: (r) => r.opened_at ? dateTimeFmt(r.opened_at) : '—' },
+  ], 'upnl');
+}
+
 function resetData() {
+  clearInterval(liveTimer);
+  liveTimer = null;
+  setSnapshot(null);
   loadedFiles.length = 0;
   rawById.clear();
   RAW = [];

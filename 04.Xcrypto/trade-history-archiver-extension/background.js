@@ -1,11 +1,17 @@
 const CONFIG = {
   baseUrl: "https://xcrypto365.com/api/v1/trade-history",
+  // Hai API mà trang chủ và trang /positions của web đang gọi.
+  statsUrl: "https://xcrypto365.com/api/v1/dashboard/stats",
+  positionsUrl: "https://xcrypto365.com/api/v1/positions",
   pageSize: 100,
   // "all" là giá trị chính trang web dùng để lấy mọi lệnh (system, manual, ...).
   // KHÔNG bỏ tham số: thiếu closed_by thì API mặc định chỉ trả lệnh system.
   closedByValues: ["all"],
   delayMs: 250,
   alarmName: "weeklyTradeCrawl",
+  // Số dư ví + lệnh đang mở thay đổi liên tục nên chụp theo lịch riêng, dày hơn nhiều.
+  snapshotAlarmName: "walletSnapshot",
+  snapshotMinutes: 5,
   defaultIntervalMinutes: 10080, // 7 ngày
   downloadFolder: "TradeHistoryArchive",
 };
@@ -39,6 +45,7 @@ chrome.runtime.onInstalled.addListener(async () => {
   const stored = await chrome.storage.local.get(["intervalMinutes", "backupMode"]);
   const period = stored.intervalMinutes || CONFIG.defaultIntervalMinutes;
   chrome.alarms.create(CONFIG.alarmName, { periodInMinutes: period, delayInMinutes: 1 });
+  ensureSnapshotAlarm();
   await chrome.storage.local.set({
     intervalMinutes: period,
     backupMode: stored.backupMode || DEFAULT_BACKUP_MODE,
@@ -48,11 +55,21 @@ chrome.runtime.onInstalled.addListener(async () => {
 // Nếu Chrome bị đóng khi alarm đến hạn, alarm sẽ tự chạy ngay khi Chrome mở lại.
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === CONFIG.alarmName) runCrawl();
+  if (alarm.name === CONFIG.snapshotAlarmName) runSnapshot();
 });
+
+async function ensureSnapshotAlarm() {
+  if (await chrome.alarms.get(CONFIG.snapshotAlarmName)) return;
+  chrome.alarms.create(CONFIG.snapshotAlarmName, {
+    periodInMinutes: CONFIG.snapshotMinutes,
+    delayInMinutes: 0.5,
+  });
+}
 
 // Mở Chrome sau một thời gian dài không dùng thì báo ngay, không đợi tới lượt crawl.
 chrome.runtime.onStartup.addListener(() => {
   checkStale();
+  ensureSnapshotAlarm();
 });
 
 /* ============================================================
@@ -102,7 +119,8 @@ async function checkStale() {
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg?.type === "RUN_NOW") {
-    runCrawl().then(sendResponse);
+    // Chụp số dư trước để popup có số mới ngay, kể cả khi crawl lịch sử lỗi.
+    runSnapshot().then(runCrawl).then(sendResponse);
     return true;
   }
   if (msg?.type === "GET_STATUS") {
@@ -110,6 +128,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       .get([
         "lastRunAt", "lastRunStatus", "lastRunCount", "lastError", "intervalMinutes",
         "backupMode", "sheetSecret", "lastSyncAt", "lastSyncAdded", "lastSyncTotal", "lastSyncError",
+        "snapshot", "snapshotError",
       ])
       .then((s) =>
         sendResponse({
@@ -215,6 +234,77 @@ function sheetErrorText(code) {
 }
 
 /* ============================================================
+   SỐ DƯ VÍ + LỆNH ĐANG MỞ
+============================================================ */
+
+async function fetchApi(url) {
+  const res = await fetch(url, {
+    method: "GET",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!res.ok) {
+    if (res.status === 401 || res.status === 403) throw new Error("AUTH_EXPIRED");
+    throw new Error(`HTTP_${res.status}`);
+  }
+  return res.json();
+}
+
+/**
+ * Chụp trạng thái hiện tại rồi đẩy lên Sheet (ghi đè, không cộng dồn).
+ * Chạy mỗi vài phút nên lỗi chỉ ghi lại cho popup, không bắn thông báo desktop —
+ * phiên hết hạn đã có runCrawl báo.
+ */
+async function runSnapshot() {
+  try {
+    const [stats, positions] = await Promise.all([
+      fetchApi(CONFIG.statsUrl),
+      fetchApi(CONFIG.positionsUrl),
+    ]);
+
+    const snapshot = {
+      taken_at: new Date().toISOString(),
+      stats: stats.data || {},
+      positions: positions.data || [],
+    };
+
+    let error = null;
+    const secret = await getSecret();
+    if (!secret) {
+      error = "Chưa nhập SECRET nên chưa đẩy được số dư lên Sheet.";
+    } else {
+      try {
+        const res = await fetch(SHEET.url, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify({ secret, snapshot }),
+        });
+        if (!res.ok) throw new Error(`Sheet trả HTTP ${res.status}`);
+        const json = await res.json();
+        if (!json.ok) throw new Error(sheetErrorText(json.error));
+        // Code.gs bản cũ bỏ qua trường snapshot mà vẫn trả ok.
+        if (!json.snapshot_saved) {
+          throw new Error("Apps Script đang chạy Code.gs bản cũ — dán Code.gs mới rồi Deploy version mới.");
+        }
+      } catch (err) {
+        error = `Không đẩy được số dư lên Sheet: ${err.message}`;
+      }
+    }
+
+    await chrome.storage.local.set({ snapshot, snapshotError: error });
+    return { ok: !error, snapshot, error };
+  } catch (err) {
+    const error =
+      err.message === "AUTH_EXPIRED"
+        ? "Phiên đăng nhập đã hết hạn — mở xcrypto365.com và đăng nhập lại."
+        : `Lỗi khi lấy số dư: ${err.message}`;
+    // Giữ nguyên snapshot cũ, popup vẫn hiện được số gần nhất kèm thời điểm chụp.
+    await chrome.storage.local.set({ snapshotError: error });
+    return { ok: false, error };
+  }
+}
+
+/* ============================================================
    CRAWL
 ============================================================ */
 
@@ -231,18 +321,7 @@ async function runCrawl() {
       let totalCount = Infinity;
 
       while ((page - 1) * CONFIG.pageSize < totalCount) {
-        const res = await fetch(buildUrl(page, closedBy), {
-          method: "GET",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-        });
-
-        if (!res.ok) {
-          if (res.status === 401 || res.status === 403) throw new Error("AUTH_EXPIRED");
-          throw new Error(`HTTP_${res.status}`);
-        }
-
-        const json = await res.json();
+        const json = await fetchApi(buildUrl(page, closedBy));
         const rows = json.data || [];
         totalCount = json.meta?.total_count ?? rows.length;
 

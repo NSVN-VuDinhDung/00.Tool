@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Trade History Auto-Archiver",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Tự động lấy và lưu trữ lịch sử trade từ xcrypto365.com theo lịch định kỳ, đẩy lên Google Sheet làm kho tổng, phòng trường hợp dữ liệu bị xoá khỏi hệ thống.",
   "permissions": ["alarms", "downloads", "storage", "notifications"],
   "host_permissions": [

@@ -4,8 +4,12 @@
  * Kho lưu trữ lịch sử trade, ghi/đọc chỉ bằng một URL (không cần OAuth, không cần GCP).
  *
  * THIẾT KẾ: CHỈ THÊM, KHÔNG BAO GIỜ XOÁ.
- * Không có hàm nào trong file này xoá hay sửa dòng đã có. Kể cả khi lộ URL,
+ * Không có hàm nào trong file này xoá hay sửa dòng lệnh đã có. Kể cả khi lộ URL,
  * thiệt hại tối đa là bị chèn rác — không mất dữ liệu cũ.
+ *
+ * NGOẠI LỆ DUY NHẤT: sheet "snapshot" (số dư ví + lệnh đang mở). Đó là trạng thái
+ * hiện tại chứ không phải lịch sử, nên mỗi lần ghi là ghi đè. Nó nằm ở sheet riêng,
+ * không đụng tới sheet "trades".
  *
  * Xem hướng dẫn cài đặt trong README.md cùng thư mục.
  */
@@ -14,6 +18,10 @@
 const SECRET = 'DOI-CHUOI-NAY-TRUOC-KHI-DEPLOY';
 
 const SHEET_NAME = 'trades';
+const SNAPSHOT_SHEET_NAME = 'snapshot';
+
+/** Một ô Sheets chứa tối đa 50.000 ký tự, nên JSON dài được cắt thành nhiều ô. */
+const SNAPSHOT_CHUNK = 40000;
 
 /** Thứ tự cột trong Sheet. KHÔNG đổi thứ tự sau khi đã có dữ liệu. */
 const COLUMNS = [
@@ -31,14 +39,20 @@ const TEXT_COLUMNS = ['opened_at', 'closed_at', 'execs'];
    ENDPOINT
 ============================================================ */
 
-/** Đọc toàn bộ kho: GET <URL>?k=SECRET */
+/**
+ * Đọc toàn bộ kho: GET <URL>?k=SECRET
+ * Chỉ lấy số dư + lệnh đang mở (nhẹ, để dashboard tự làm mới): GET <URL>?k=SECRET&only=snapshot
+ */
 function doGet(e) {
   const guard = checkSecret((e && e.parameter && e.parameter.k) || '');
   if (guard) return guard;
 
+  const snapshot = readSnapshot();
+  if (e && e.parameter && e.parameter.only === 'snapshot') return json({ ok: true, snapshot: snapshot });
+
   const sh = ensureSheet();
   const last = sh.getLastRow();
-  if (last < 2) return json({ ok: true, exported_at: nowIso(), total: 0, trades: [] });
+  if (last < 2) return json({ ok: true, exported_at: nowIso(), total: 0, trades: [], snapshot: snapshot });
 
   const values = sh.getRange(2, 1, last - 1, COLUMNS.length).getValues();
   const trades = values.map(rowToTrade);
@@ -50,10 +64,13 @@ function doGet(e) {
     return 0;
   });
 
-  return json({ ok: true, exported_at: nowIso(), total: trades.length, trades: trades });
+  return json({ ok: true, exported_at: nowIso(), total: trades.length, trades: trades, snapshot: snapshot });
 }
 
-/** Ghi thêm: POST <URL>, body = { "secret": "...", "trades": [ ... ] } */
+/**
+ * Ghi thêm: POST <URL>, body = { "secret": "...", "trades": [ ... ], "snapshot": { ... } }
+ * Cả "trades" lẫn "snapshot" đều tuỳ chọn; có cái nào thì ghi cái đó.
+ */
 function doPost(e) {
   var body;
   try {
@@ -66,7 +83,8 @@ function doPost(e) {
   if (guard) return guard;
 
   const incoming = body.trades || [];
-  if (!incoming.length) return json({ ok: true, added: 0, received: 0 });
+  const snapshot = body.snapshot && typeof body.snapshot === 'object' ? body.snapshot : null;
+  if (!incoming.length && !snapshot) return json({ ok: true, added: 0, received: 0 });
 
   // Chặn hai lần chạy đè lên nhau (alarm + bấm "Chạy ngay" cùng lúc).
   const lock = LockService.getScriptLock();
@@ -77,7 +95,13 @@ function doPost(e) {
   }
 
   try {
+    if (snapshot) writeSnapshot(snapshot);
+
     const sh = ensureSheet();
+    if (!incoming.length) {
+      return json({ ok: true, added: 0, received: 0, total: Math.max(0, sh.getLastRow() - 1), snapshot_saved: true });
+    }
+
     const seen = existingIdSet(sh);
     const rows = [];
 
@@ -100,6 +124,7 @@ function doPost(e) {
       added: rows.length,
       received: incoming.length,
       total: Math.max(0, sh.getLastRow() - 1),
+      snapshot_saved: !!snapshot,
     });
   } catch (err) {
     return json({ ok: false, error: String(err) });
@@ -126,6 +151,33 @@ function ensureSheet() {
     }
   }
   return sh;
+}
+
+/** Ghi đè snapshot: JSON cắt khúc xuống cột A của sheet riêng. */
+function writeSnapshot(snapshot) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(SNAPSHOT_SHEET_NAME);
+  if (!sh) sh = ss.insertSheet(SNAPSHOT_SHEET_NAME);
+
+  const text = JSON.stringify(snapshot);
+  const rows = [];
+  for (var i = 0; i < text.length; i += SNAPSHOT_CHUNK) rows.push([text.substr(i, SNAPSHOT_CHUNK)]);
+
+  sh.getRange('A:A').clearContent().setNumberFormat('@');
+  sh.getRange(1, 1, rows.length, 1).setValues(rows);
+}
+
+/** Trả về snapshot gần nhất, hoặc null nếu extension chưa gửi lần nào. */
+function readSnapshot() {
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SNAPSHOT_SHEET_NAME);
+  if (!sh) return null;
+  const last = sh.getLastRow();
+  if (last < 1) return null;
+
+  const vals = sh.getRange(1, 1, last, 1).getValues();
+  var text = '';
+  for (var i = 0; i < vals.length; i++) text += String(vals[i][0]);
+  try { return JSON.parse(text); } catch (err) { return null; }
 }
 
 /** Đọc nguyên cột id trong 1 lần gọi — đây là chỗ quyết định tốc độ. */

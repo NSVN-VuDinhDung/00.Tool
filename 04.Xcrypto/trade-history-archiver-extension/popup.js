@@ -2,6 +2,15 @@ const $ = (sel) => document.querySelector(sel);
 
 const timeFmt = (iso) => (iso ? new Date(iso).toLocaleString("vi-VN") : null);
 
+const money = (v) =>
+  "$" + Math.abs(Number(v) || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+function setSigned(el, v) {
+  const n = Number(v) || 0;
+  el.textContent = (n >= 0 ? "+" : "−") + money(n);
+  el.className = n >= 0 ? "ok" : "err";
+}
+
 function showMsg(el, text, kind) {
   if (!text) {
     el.style.display = "none";
@@ -32,6 +41,20 @@ async function refreshStatus() {
 
   $("#lastCount").textContent = status.lastRunCount ?? "—";
   showMsg($("#lastError"), status.lastError, "bad");
+
+  /* ---------- ví & lệnh đang mở ---------- */
+  const snap = status.snapshot;
+  if (snap) {
+    const stats = snap.stats || {};
+    const positions = snap.positions || [];
+    const unrealized = positions.reduce((s, p) => s + (parseFloat(p.unrealized_pnl) || 0), 0);
+    $("#snapBalance").textContent = money(stats.current_balance);
+    setSigned($("#snapToday"), stats.today_pnl);
+    $("#snapOpen").textContent = positions.length;
+    setSigned($("#snapUnrealized"), unrealized);
+    $("#snapAt").textContent = timeFmt(snap.taken_at);
+  }
+  showMsg($("#snapError"), status.snapshotError, "bad");
 
   /* ---------- sheet ---------- */
   $("#syncRun").textContent = timeFmt(status.lastSyncAt) || "Chưa đẩy lần nào";

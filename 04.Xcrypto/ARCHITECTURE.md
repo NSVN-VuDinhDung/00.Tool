@@ -479,3 +479,4 @@ Xem log Apps Script: trình soạn thảo → **Executions**.
 | 1.0.0 | Crawl theo lịch, tải file JSON mỗi lần chạy |
 | 1.1.0 | Đẩy lên Google Sheet; file JSON hạ cấp thành bản cứu hộ; dashboard đọc thẳng từ Sheet |
 | 1.2.0 | Thông báo desktop, cảnh báo kho bị bỏ quên, bộ icon |
+| 1.3.0 | Chụp số dư ví + lệnh đang mở mỗi 5 phút (`/api/v1/dashboard/stats`, `/api/v1/positions`), ghi đè vào sheet `snapshot`; dashboard có khu "Hiện tại" tự làm mới mỗi phút qua `GET ?only=snapshot`. Cần Deploy version mới của `Code.gs` |
