@@ -241,6 +241,9 @@ async function fetchApi(url) {
   const res = await fetch(url, {
     method: "GET",
     credentials: "include",
+    // no-store là bắt buộc: số dư đổi liên tục, lấy lại bản cache là chụp ra số cũ
+    // trong khi web hiện số mới — rất khó phát hiện vì không có lỗi nào cả.
+    cache: "no-store",
     headers: { "Content-Type": "application/json" },
   });
   if (!res.ok) {
