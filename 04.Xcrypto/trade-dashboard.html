@@ -78,6 +78,7 @@
   #app, #liveSection{display:none;}
   #app.visible, #liveSection.visible{display:block;}
   #liveAge.stale{color:var(--accent);}
+  .sub.stale{color:var(--accent);}
   #positionsTable td.empty-row{padding:18px;text-align:center;color:var(--text-faint);font-size:13px;}
 
   /* ---------- filter bar ---------- */
@@ -843,6 +844,10 @@ function renderWithdraw() {
   const hasBalance = !!(SNAPSHOT && SNAPSHOT.stats);
   const balance = hasBalance ? num(SNAPSHOT.stats.current_balance) : 0;
   const profit = invested !== null && hasBalance ? balance + withdrawn - invested : null;
+  // Số dư cũ mà vẫn cộng tiền đã rút là tính hai lần: khoản vừa rút vẫn còn nằm
+  // trong số dư cũ. Lãi thực khi đó cao hơn thực tế, nên phải nói ra thay vì để im.
+  const balanceAge = hasBalance ? Date.now() - new Date(SNAPSHOT.taken_at).getTime() : 0;
+  const balanceStale = hasBalance && balanceAge > LIVE_STALE_MS;
 
   $('#wdStats').innerHTML = `
     <div class="cell">
@@ -858,8 +863,10 @@ function renderWithdraw() {
     <div class="cell">
       <div class="label">Lãi thực</div>
       <div class="value ${profit === null ? '' : cls(profit)}">${profit === null ? '—' : fmtSigned(profit)}</div>
-      <div class="sub">${profit !== null
-        ? `ví ${usd(balance)} + đã rút ${usd(withdrawn)} − vốn ${usd(invested)} · ${fmtSigned((profit / invested) * 100, 1)}% trên vốn`
+      <div class="sub ${balanceStale ? 'stale' : ''}">${profit !== null
+        ? (balanceStale
+          ? `số dư ví chụp ${agoText(balanceAge)}, chưa chắc đã trừ tiền vừa rút — số này có thể cao hơn thực tế`
+          : `ví ${usd(balance)} + đã rút ${usd(withdrawn)} − vốn ${usd(invested)} · ${fmtSigned((profit / invested) * 100, 1)}% trên vốn`)
         : (capital ? 'chưa có số dư ví từ extension' : 'cần vốn ban đầu và số dư ví')}</div>
     </div>
     <div class="cell">
