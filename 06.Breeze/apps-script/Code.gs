@@ -150,22 +150,39 @@ function pickRandom_(posts) {
 
 // ============ TELEGRAM ============
 
+/**
+ * Trả về danh sách tin cần gửi. Mỗi phần tử là chuỗi HTML, hoặc { text, previewUrl }.
+ * Nếu có file Telegraph.gs thì bài dài được đăng lên Telegraph; xoá file đó là về như cũ.
+ */
 function buildMessages_(post, prefix) {
-  const date = Utilities.formatDate(new Date(), TZ, 'dd/MM/yyyy');
-  const head = prefix + (HEADER ? HEADER.replace('{date}', date) + '\n\n' : '');
-  const tail = post.author ? '\n\n— <i>' + esc_(post.author) + '</i>' : '';
+  if (typeof telegraphMessages_ === 'function') {
+    const viaTelegraph = telegraphMessages_(post, prefix, false);
+    if (viaTelegraph) return viaTelegraph;
+  }
+  const head = headLine_(prefix);
+  const tail = authorLine_(post);
   const chunks = splitText_(post.content, MAX_LEN);
   return chunks.map(function (c, i) {
     return (i === 0 ? head : '') + esc_(c) + (i === chunks.length - 1 ? tail : '');
   });
 }
 
-function sendMessage_(text) {
+function headLine_(prefix) {
+  const date = Utilities.formatDate(new Date(), TZ, 'dd/MM/yyyy');
+  return prefix + (HEADER ? HEADER.replace('{date}', date) + '\n\n' : '');
+}
+
+function authorLine_(post) {
+  return post.author ? '\n\n— <i>' + esc_(post.author) + '</i>' : '';
+}
+
+function sendMessage_(msg) {
+  const m = typeof msg === 'string' ? { text: msg } : msg;
   return telegram_('sendMessage', {
     chat_id: requireChatId_(),
-    text: text,
+    text: m.text,
     parse_mode: 'HTML',
-    link_preview_options: { is_disabled: true },
+    link_preview_options: m.previewUrl ? { url: m.previewUrl } : { is_disabled: true },
   });
 }
 

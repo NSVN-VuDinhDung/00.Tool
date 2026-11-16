@@ -106,6 +106,39 @@ Bài dài hơn khoảng 3800 ký tự sẽ tự được cắt thành nhiều ti
 
 ---
 
+## Tuỳ chọn: bài dài đăng lên Telegraph
+
+Bài dài hơn 3800 ký tự sẽ được đăng lên **telegra.ph**. Telegram chỉ nhận **1 tin** gồm tiêu đề,
+đoạn mở đầu và link **⚡ Instant View** để đọc toàn bài ngay trong app. Bài ngắn vẫn gửi thẳng như cũ.
+
+**Bật:**
+
+1. Trong Apps Script, bấm **＋** cạnh mục *Files* → **Script** → đặt tên `Telegraph`.
+2. Dán nội dung file [`apps-script/Telegraph.gs`](apps-script/Telegraph.gs) vào rồi lưu.
+3. Đồng thời dán lại `Code.gs` bản mới nhất (có thêm chỗ nối sang Telegraph).
+4. Chạy hàm **`sendTestTelegraph`**: hàm này lấy **bài dài nhất** trong Sheet, đăng lên Telegraph
+   và gửi thử (không tính vào số lần gửi).
+   - Lần đầu chạy, script tự tạo tài khoản Telegraph và lưu `TELEGRAPH_TOKEN` vào Script Properties.
+
+**Tiêu đề trang:** nếu dòng đầu của bài ngắn (từ 120 ký tự trở xuống), dòng đó được dùng làm
+tiêu đề. Nếu không, tiêu đề là khoảng 80 ký tự đầu của bài.
+
+**Tắt hoặc quay về bản cũ:** chọn một trong hai cách.
+
+- Xoá file `Telegraph.gs` trong Apps Script (⋮ cạnh tên file → **Delete**). `Code.gs` tự quay về
+  cách cắt thành nhiều tin.
+- Hoặc sửa thành `TELEGRAPH_ENABLED = false` trong `Telegraph.gs`.
+
+**Khi Telegraph bị lỗi** lúc gửi hằng ngày: script tự chuyển sang cách cắt nhiều tin, nên hôm đó
+vẫn có bài.
+
+**Đổi ngưỡng:** muốn bài vừa vừa (ví dụ trên 1500 ký tự) cũng đăng Telegraph thì sửa
+`TELEGRAPH_MIN_LEN`.
+
+> Trang Telegraph là **công khai**: ai có link đều xem được, và không xoá được qua API.
+
+---
+
 ## Cách hoạt động & tuỳ chỉnh
 
 | Thứ | Ở đâu |
